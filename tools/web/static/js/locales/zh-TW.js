@@ -651,7 +651,7 @@ export default Object.freeze({
   "stage.generation": "動作生成",
   "stage.hamer": "手指精修",
   "stage.scene": "場景對齊",
-  "stage.hint_detection": "YOLOX 人物偵測與追蹤",
+  "stage.hint_detection": "人物偵測與身分追蹤",
   "stage.hint_camera": "VGGT-Omega 相機估計",
   "stage.hint_static": "使用固定機位，略過相機估計",
   "stage.hint_feature_extract": "SAM 3D Body 特徵擷取",
@@ -676,5 +676,13 @@ export default Object.freeze({
   "progress.correction_sole": "腳掌貼地 {strength}",
   "progress.correction_sole_unchanged": "腳掌貼地 {strength}（未調整）",
   "progress.ahead": "前面還有 {count} 個任務",
-  "progress.starting_soon": "即將開始"
+  "progress.starting_soon": "即將開始",
+  "person.backend": "人物偵測與隔離",
+  "person.backend_yolox": "YOLOX · 原始畫面",
+  "person.backend_isolated": "YOLO26 · 逐人分割隔離（實驗）",
+  "person.backend_hint": "隔離模式保留選定人物，模糊其他畫面，再逐人動捕。需額外依賴和模型；無法恢復被遮擋的肢體。",
+  "server.param_person_backend": "請選擇 YOLOX 或 YOLO26 人物分割隔離。",
+  "job.segmentation_frames": "人物分割與追蹤 · {current}/{total} 幀",
+  "job.isolation_frames": "逐人隔離 · {current}/{total} 幀",
+  "progress.isolation": "人物隔離：{frames} 人物幀，其中 {missing} 幀無有效遮罩（保持模糊）。"
 });

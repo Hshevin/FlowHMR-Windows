@@ -29,6 +29,7 @@ function samChunkSize(value) {
 
 export function initParams(defaults, manualBatchDefault) {
   const manual = bindToggle("optManual");
+  const personBackend = $("optPersonBackend");
   const post = bindToggle("optPostprocess");
   const hamer = bindToggle("optHamer");
   const hamerButton = $("optHamer"), hamerStride = $("optHamerStride");
@@ -105,6 +106,7 @@ export function initParams(defaults, manualBatchDefault) {
   const apply = (p, correction, prefs) => {
     const chunkSize = samChunkSize(p.sam_chunk_size ?? prefs?.manualBatch ?? manualBatchDefault);
     manual.set(p.manual_select ?? true);
+    personBackend.value = p.person_backend ?? "yolox";
     post.set(!$("optPostprocess").disabled && !!p.postprocess);
     hamer.set(!hamerButton.disabled && !!p.hamer);
     hamerStride.value = p.hamer_stride ?? 1;
@@ -136,6 +138,7 @@ export function initParams(defaults, manualBatchDefault) {
     if (!validStrength(smoothing.valueAsNumber)) throw appError("settings.smoothing_invalid");
     const out = {
       manual_select: manual.get(),
+      person_backend: personBackend.value,
       postprocess: post.get(),
       hamer: !hamerButton.disabled && hamer.get(),
       hamer_stride: Number(hamerStride.value),

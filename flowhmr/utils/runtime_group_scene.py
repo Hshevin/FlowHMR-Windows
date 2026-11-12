@@ -136,6 +136,7 @@ def _shared_camera(video, entries, destination, frame_range, device, check, noti
 def _observe(video, tracks, intrinsics, first, extractor, check, notify):
     import cv2
     import torch
+    from .runtime_person_isolation import MASK_CACHE, PersonMasks, isolate_frame
 
     samples = defaultdict(list)
     for t in tracks:
@@ -145,7 +146,11 @@ def _observe(video, tracks, intrinsics, first, extractor, check, notify):
             samples[int(frame)].append(t)
     cap = cv2.VideoCapture(str(video))
     position = 0
+    mask_readers = {}
     try:
+        for t in tracks:
+            if t["job"]["params"].get("person_backend") == "yolo26_isolated":
+                mask_readers[t["job"]["id"]] = PersonMasks(t["directory"] / "input" / MASK_CACHE)
         for index, (frame, selected) in enumerate(sorted(samples.items()), 1):
             check()
             if frame - position > 10 and cap.set(cv2.CAP_PROP_POS_FRAMES, frame):
@@ -163,7 +168,22 @@ def _observe(video, tracks, intrinsics, first, extractor, check, notify):
                 chunk = selected[cursor:cursor + size]
                 boxes = np.stack([t["boxes"][frame - t["range"][0]] for t in chunk])
                 try:
-                    points = extractor.scene_keypoints(image, boxes, intrinsics[frame - first], MHR_JOINTS)
+                    if mask_readers:
+                        observations = []
+                        for t, box in zip(chunk, boxes):
+                            reader = mask_readers.get(t["job"]["id"])
+                            actor_image = image
+                            if reader is not None:
+                                mask = reader.mask(frame, t["track_id"])
+                                if not mask.any():
+                                    observations.append(np.full((len(MHR_JOINTS), 3), np.nan))
+                                    continue
+                                actor_image = isolate_frame(image, mask)
+                            observations.append(extractor.scene_keypoints(
+                                actor_image, box[None], intrinsics[frame - first], MHR_JOINTS)[0])
+                        points = np.stack(observations)
+                    else:
+                        points = extractor.scene_keypoints(image, boxes, intrinsics[frame - first], MHR_JOINTS)
                 except torch.cuda.OutOfMemoryError:
                     if size == 1:
                         raise
@@ -182,6 +202,8 @@ def _observe(video, tracks, intrinsics, first, extractor, check, notify):
                 notify(f"对齐多人站位 · {index}/{len(samples)} 个素材帧")
     finally:
         cap.release()
+        for reader in mask_readers.values():
+            reader.close()
 
 
 def _save_scene_motion(destination, tracks, people):
@@ -219,6 +241,7 @@ def build_group_scene(destination, members, inspection, extractor, device, *, ch
         with np.load(directory / "input" / "input_bbox.npz", allow_pickle=False) as data:
             start, end = map(int, data["start_end"])
             boxes = data["bbox"]
+            track_id = int(data["track_id"]) if "track_id" in data else -1
         reference = job.get("body_reference") or "neutral"
         stream, info = inspection.load(directory, body_reference=reference)
         if info["frames"] != end - start + 1 or len(boxes) != info["frames"]:
@@ -228,7 +251,7 @@ def build_group_scene(destination, members, inspection, extractor, device, *, ch
             all_joints = np.fromfile(stream, dtype="<f4").reshape(info["frames"], -1, 3)
             rest_root = all_joints[0, 0] - data["trans"][0]
         ground = (job.get("correction") or {}).get("floor_m", info["ground"]["height_m"])
-        tracks.append(dict(job=job, directory=directory, range=(start, end), boxes=boxes,
+        tracks.append(dict(job=job, directory=directory, range=(start, end), boxes=boxes, track_id=track_id,
                            floor=ground, joints=all_joints, rest_root=rest_root, body_reference=reference))
     first = min(t["range"][0] for t in tracks)
     last = max(t["range"][1] for t in tracks)

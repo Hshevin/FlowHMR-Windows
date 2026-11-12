@@ -651,7 +651,7 @@ export default Object.freeze({
   "stage.generation": "モーション生成",
   "stage.hamer": "指の補正",
   "stage.scene": "シーン整列",
-  "stage.hint_detection": "YOLOX による人物検出と追跡",
+  "stage.hint_detection": "人物検出と識別追跡",
   "stage.hint_camera": "VGGT-Omega によるカメラ推定",
   "stage.hint_static": "固定カメラを使用し、推定は省略",
   "stage.hint_feature_extract": "SAM 3D Body による特徴抽出",
@@ -676,5 +676,13 @@ export default Object.freeze({
   "progress.correction_sole": "足裏接地 {strength}",
   "progress.correction_sole_unchanged": "足裏接地 {strength}（補正なし）",
   "progress.ahead": "先行ジョブ：{count} 件",
-  "progress.starting_soon": "まもなく開始"
+  "progress.starting_soon": "まもなく開始",
+  "person.backend": "人物検出と分離",
+  "person.backend_yolox": "YOLOX · 元の映像",
+  "person.backend_isolated": "YOLO26 · 人物ごとに分離（実験的）",
+  "person.backend_hint": "選択した人物を鮮明に保ち、その他をぼかして個別に動作を生成します。追加の依存関係とモデルが必要です。隠れた手足は復元できません。",
+  "server.param_person_backend": "YOLOX または YOLO26 の人物分離を選択してください。",
+  "job.segmentation_frames": "人物分割と追跡 · {current}/{total} フレーム",
+  "job.isolation_frames": "人物分離 · {current}/{total} フレーム",
+  "progress.isolation": "人物分離：{frames} 人物フレーム。有効なマスクのない {missing} フレームはぼかしたままです。"
 });

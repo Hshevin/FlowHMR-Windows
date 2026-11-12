@@ -651,7 +651,7 @@ export default Object.freeze({
   "stage.generation": "Génération du mouvement",
   "stage.hamer": "Affinage des doigts",
   "stage.scene": "Alignement de la scène",
-  "stage.hint_detection": "Détection et suivi des personnes par YOLOX",
+  "stage.hint_detection": "Détection et suivi de l’identité des personnes",
   "stage.hint_camera": "Estimation de la caméra par VGGT-Omega",
   "stage.hint_static": "Caméra fixe ; estimation ignorée",
   "stage.hint_feature_extract": "Extraction des caractéristiques par SAM 3D Body",
@@ -676,5 +676,13 @@ export default Object.freeze({
   "progress.correction_sole": "Contact de la semelle {strength}",
   "progress.correction_sole_unchanged": "Contact de la semelle {strength} (sans ajustement)",
   "progress.ahead": "Tâches avant celle-ci : {count}",
-  "progress.starting_soon": "Démarrage imminent"
+  "progress.starting_soon": "Démarrage imminent",
+  "person.backend": "Détection et isolation des personnes",
+  "person.backend_yolox": "YOLOX · images originales",
+  "person.backend_isolated": "YOLO26 · isolation par personne (expérimental)",
+  "person.backend_hint": "Conserve la personne sélectionnée nette et floute le reste avant chaque capture. Nécessite des dépendances et modèles supplémentaires ; ne restaure pas les membres cachés.",
+  "server.param_person_backend": "Choisissez YOLOX ou l’isolation YOLO26.",
+  "job.segmentation_frames": "Segmentation et suivi · {current}/{total} images",
+  "job.isolation_frames": "Isolation de la personne · {current}/{total} images",
+  "progress.isolation": "Isolation : {frames} images de personnes ; {missing} images sans masque valide restent floutées."
 });

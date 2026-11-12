@@ -5,7 +5,7 @@ Launch (from the repo root):
 then open http://<host>:8080
 
 Pipeline per job (runs on one GPU, jobs are queued):
-    transcode 30fps -> YOLOX detection + tracking -> VGGT-Omega camera
+    transcode 30fps -> selected person detector + tracking -> VGGT-Omega camera
     -> SAM-3D-Body tokens -> FlowHMR flow-matching generation
 """
 import argparse
@@ -59,10 +59,11 @@ from flowhmr.model_inventory import model_inventory
 from flowhmr.model_downloads import ACTIVE_DOWNLOAD, DownloadError, ModelDownloads, missing_downloads
 from flowhmr.runtime_environments import RUNTIME
 from flowhmr import runtime_rocm
+from flowhmr.utils.runtime_person_isolation import BACKENDS, MASK_CACHE
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 STAGES = [
-    ("detection", "Detection", "YOLOX person detection & tracking"),
+    ("detection", "Detection", "Person detection & identity tracking"),
     ("camera", "Camera", "VGGT-Omega camera estimation"),
     ("feature_extract", "Body features", "SAM-3D-Body feature extraction"),
     ("generation", "Generation", "FlowHMR flow-matching generation"),
@@ -127,8 +128,11 @@ class UserMessage(ValueError):
 
 
 # --------------------------------------------------------------------------- engine
-def checked_model_paths(args, body_reference=None):
+def checked_model_paths(args, body_reference=None, *, person_backend="yolox"):
     paths = core_model_paths(args.ckpt, args.model_cfg, body_reference=body_reference)
+    if person_backend != "yolox":
+        from flowhmr.model_files import YOLOX, resolve_model
+        paths = tuple(path for path in paths if path != resolve_model(YOLOX))
     missing = missing_model_paths(paths)
     if missing:
         listing = "\n".join(missing)
@@ -184,7 +188,11 @@ def get_engine(job_id, requested_reference=None):
             raise missing_body_reference(requested_reference) from error
         raise UserMessage("尚未安装可用的 SMPL-H 体型。请导入官方 MANO v1.2 的男／女体型，或 Extended SMPL+H 的中性体型。",
                           "model_body_required") from error
-    paths = checked_model_paths(ARGS, reference)
+    backend = JOBS[job_id]["params"].get("person_backend", "yolox")
+    if backend == "yolo26_isolated":
+        from flowhmr.utils.runtime_person_isolation import check_dependencies
+        check_dependencies()
+    paths = checked_model_paths(ARGS, reference, person_backend=backend)
     if ENGINE is None or ENGINE.body_reference != reference:
         old = ENGINE
         ENGINE = _POSTPROCESS = None
@@ -219,6 +227,7 @@ def get_postprocess(floor, preset, *, sole_fit_strength=0.0):
 # --------------------------------------------------------------------------- parameters
 # Defaults for the page's Settings card; everything is editable per run in the UI.
 DEFAULT_PARAMS = {
+    "person_backend": "yolox",
     "seed": 0, "cfg_scale": 1.0, "steps": 20, "max_frames": None, "vggt_interval": 0,
     "sam_chunk_size": None, "start_frame": 0, "end_frame": None,
     "postprocess": True, "manual_select": True, "auto_frames": True, "static_camera": True,
@@ -260,6 +269,9 @@ def parse_params(src, base=None):
                         if "sole_fit_strength" in settings or "sole_fit" in settings)
     sole_fit_strength = _read_sole_fit_strength(fit_settings)
     base = {**defaults, **(base or {})}
+    backend = src.get("person_backend", base["person_backend"])
+    if backend not in BACKENDS:
+        raise UserMessage("请选择 YOLOX 或 YOLO26 人物分割隔离。", "param_person_backend")
 
     def number(key, cast, lo, hi):
         raw = src.get(key)
@@ -313,6 +325,7 @@ def parse_params(src, base=None):
 
     vggt_interval = number("vggt_interval", int, 0, 120)
     return {
+        "person_backend": backend,
         "seed": number("seed", int, 0, 2 ** 31 - 1),
         "cfg_scale": number("cfg_scale", float, 0.0, 10.0),
         "steps": number("steps", int, 1, 100),
@@ -599,7 +612,8 @@ def _raise_if_cancelled(job_id):
 
 
 def _link_video(source, target):
-    # Source and transcoded videos are immutable. Only link videos, never per-person caches.
+    # Only immutable sources: original/transcoded video and the completed shared
+    # mask database. Never link mutable per-person feature or bbox caches.
     try:
         os.link(source, target)
     except OSError:
@@ -660,7 +674,10 @@ def _confirm_people(job_id, result, candidates, people, *, automatic):
             _link_video(os.path.join(directory, canonical), os.path.join(child_stage, canonical))
             _copy_person_thumbnail(directory, child_stage, i)
             bbox, start_end = VideoProcessor.track_bboxes(result, candidate["track_index"])
-            np.savez(os.path.join(sub_dir, f"{SUB}_bbox.npz"), bbox=bbox, start_end=start_end)
+            np.savez(os.path.join(sub_dir, f"{SUB}_bbox.npz"), bbox=bbox, start_end=start_end,
+                     track_id=candidate["track_id"], person_backend=params.get("person_backend", "yolox"))
+            if params.get("person_backend") == "yolo26_isolated":
+                _link_video(os.path.join(directory, SUB, MASK_CACHE), os.path.join(sub_dir, MASK_CACHE))
             _write_job(child, child_stage)
             children.append((child, child_stage))
 
@@ -704,6 +721,10 @@ def _scene_status_locked(parent, members):
     view = {**parent, "selected_person": None, "candidates": None,
             "person_count": len(members), "person_done": len(completed),
             "has_fbx": False, "error": None, "error_code": None, "error_params": {}}
+    reports = [j["isolation_report"] for j in members if j.get("isolation_report")]
+    if reports:
+        view["isolation_report"] = {key: sum(r[key] for r in reports)
+                                    for key in ("missing_mask_frames", "frames")}
     if active:
         order = ("waiting_user", "running", "cancel_requested", "queued", "uploading")
         current = min(active, key=lambda j: (order.index(j["status"]), j["created"]))
@@ -881,6 +902,7 @@ def run_job(job_id):
         hamer_stride=params["hamer_stride"],
         vggt_frame_interval=params["vggt_interval"],
         static_camera=params.get("static_camera", False),
+        person_backend=params.get("person_backend", "yolox"),
         sam_chunk_size=params.get("sam_chunk_size", DEFAULT_PARAMS["sam_chunk_size"]),
         person_selector=select_person if params.get("manual_select", True) else None,
         progress_callback=on_progress,
@@ -1404,7 +1426,8 @@ def api_rerun(job_id):
         dst_sub = os.path.join(job_dir(job["id"]), SUB)
         os.makedirs(dst_sub, exist_ok=True)
         skip = (f"{SUB}_seed",)  # generated motion is recomputed
-        reselect = _to_bool(body.get("reselect_person"), False)
+        backend_changed = params["person_backend"] != src["params"].get("person_backend", "yolox")
+        reselect = _to_bool(body.get("reselect_person"), False) or backend_changed
         camera_changed = params["static_camera"] != src["params"].get("static_camera", False)
         def requested_range(settings):
             end = settings.get("end_frame")
@@ -1415,15 +1438,16 @@ def api_rerun(job_id):
         range_changed = requested_range(src["params"]) != requested_range(params)
         if reselect:
             # per-person caches are invalidated so detection runs and the user picks again
-            skip += (f"{SUB}_bbox.npz",)
+            skip += (f"{SUB}_bbox.npz", MASK_CACHE)
         if reselect or camera_changed or range_changed:
             # SAM conditioning also depends on camera intrinsics, not just frame count.
             skip += (f"{SUB}_sam3d_feat.pt", f"{SUB}_vggt_camera.npz",
                      f"{SUB}_sam3d_feat_static.pt", f"{SUB}_static_camera.npz")
+            skip += (f"{SUB}_sam3d_feat", f"{SUB}_isolated")
         elif not params["static_camera"] and params["vggt_interval"] != src["params"]["vggt_interval"]:
-            skip += (f"{SUB}_sam3d_feat.pt", f"{SUB}_vggt_camera.npz")
+            skip += (f"{SUB}_sam3d_feat", f"{SUB}_vggt_camera.npz")
         if params["sam_chunk_size"] != src["params"].get("sam_chunk_size", DEFAULT_PARAMS["sam_chunk_size"]):
-            skip += (f"{SUB}_sam3d_feat.pt", f"{SUB}_sam3d_feat_static.pt")
+            skip += (f"{SUB}_sam3d_feat",)
         for name in os.listdir(src_sub):
             path = os.path.join(src_sub, name)
             if not name.startswith(skip) and os.path.isfile(path):

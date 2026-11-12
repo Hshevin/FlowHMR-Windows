@@ -75,7 +75,8 @@ const runtime = initRuntimeDialog();
 let params = null;
 
 function renderModelStatus(loaded, loading = false) {
-  const missing = info?.model_files?.items.some((item) => item.blocking);
+  const isolated = $("optPersonBackend").value === "yolo26_isolated";
+  const missing = info?.model_files?.items.some((item) => item.blocking && !(isolated && item.id === "yolox"));
   $("btnModels").classList.toggle("needs-models", !!missing);
   setText($("modelInfo"), !info ? m("connection.offline") : missing ? m("models.required_missing")
     : loading ? m("models.loading") : loaded ? info.device : m("models.deferred"));
@@ -112,6 +113,8 @@ if (info?.postprocess_available === false) {
   setText($("postprocessHint"), m("correction.unavailable"));
 }
 params = initParams(info?.defaults ?? {}, info?.sam_manual_default ?? 24);
+$("optPersonBackend").addEventListener("change", () => renderModelStatus(info?.models_loaded));
+renderModelStatus(info?.models_loaded);
 if (info?.runtime?.supported) runtime.restore();
 trim.setCapacity(info?.motion_frame_capacity);
 const jobs = (await history.refresh()) ?? [];

@@ -651,7 +651,7 @@ export default Object.freeze({
   "stage.generation": "Motion generation",
   "stage.hamer": "Finger refinement",
   "stage.scene": "Scene alignment",
-  "stage.hint_detection": "YOLOX person detection and tracking",
+  "stage.hint_detection": "Person detection and identity tracking",
   "stage.hint_camera": "VGGT-Omega camera estimation",
   "stage.hint_static": "Fixed camera; camera estimation skipped",
   "stage.hint_feature_extract": "SAM 3D Body feature extraction",
@@ -676,5 +676,13 @@ export default Object.freeze({
   "progress.correction_sole": "Sole fitting {strength}",
   "progress.correction_sole_unchanged": "Sole fitting {strength} (no adjustment)",
   "progress.ahead": "Jobs ahead: {count}",
-  "progress.starting_soon": "Starting soon"
+  "progress.starting_soon": "Starting soon",
+  "person.backend": "Person detection and isolation",
+  "person.backend_yolox": "YOLOX · original frames",
+  "person.backend_isolated": "YOLO26 · isolate each person (experimental)",
+  "person.backend_hint": "Keep the selected person clear, blur everything else, then capture each person. Requires optional dependencies and weights; cannot recover hidden limbs.",
+  "server.param_person_backend": "Choose YOLOX or YOLO26 person isolation.",
+  "job.segmentation_frames": "Segmenting and tracking · {current}/{total} frames",
+  "job.isolation_frames": "Isolating person · {current}/{total} frames",
+  "progress.isolation": "Person isolation: {frames} actor frames; {missing} frames without a valid mask remain blurred."
 });

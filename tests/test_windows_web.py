@@ -18,6 +18,80 @@ server = module_from_spec(_spec)
 _spec.loader.exec_module(server)
 
 
+class PersonBackendTest(unittest.TestCase):
+    def test_multiple_selections_share_masks_but_keep_distinct_track_ids(self):
+        import numpy as np
+        with TemporaryDirectory() as directory:
+            processor = SimpleNamespace(track_bboxes=lambda result, index: (
+                np.tile([index * 10, 0, index * 10 + 10, 20], (2, 1)), np.array([index, index + 1])))
+            with (patch.object(server, "ARGS", SimpleNamespace(work_dir=directory)),
+                  patch.object(server, "JOBS", {}), patch.object(server, "MEMBER_DIRS", {}),
+                  patch.object(server, "enqueue") as enqueue,
+                  patch.dict(sys.modules, {"flowhmr.utils.runtime_video_processing": SimpleNamespace(VideoProcessor=processor)})):
+                job = server.new_job("people.mp4", server.parse_params({"person_backend": "yolo26_isolated"}), ".mp4")
+                root = Path(server.job_dir(job["id"]))
+                (root / "input.mp4").write_bytes(b"source")
+                (root / "input").mkdir()
+                (root / "input/input_30fps.mp4").write_bytes(b"canonical")
+                (root / "input/person_masks.sqlite").write_bytes(b"immutable masks")
+                candidates = [dict(index=i, track_index=i, track_id=11 * (i + 1), num_frames=2, start=i, end=i + 1)
+                              for i in range(2)]
+                server._confirm_people(job["id"], SimpleNamespace(width=64, height=48, total_frames=3),
+                                       candidates, [0, 1], automatic=False)
+                child = enqueue.call_args.args[0]
+                self.assertEqual(child["person_track"]["track_id"], 22)
+                self.assertEqual(server.JOBS[job["id"]]["person_track"]["track_id"], 11)
+                sub = Path(server.job_dir(child["id"])) / "input"
+                self.assertEqual((sub / "person_masks.sqlite").read_bytes(), b"immutable masks")
+                with np.load(sub / "input_bbox.npz", allow_pickle=False) as data:
+                    self.assertEqual(int(data["track_id"]), 22)
+                    self.assertEqual(str(data["person_backend"]), "yolo26_isolated")
+                    np.testing.assert_array_equal(data["start_end"], [1, 2])
+
+    def test_default_optional_backend_and_invalid_values(self):
+        self.assertEqual(server.parse_params({})["person_backend"], "yolox")
+        self.assertEqual(server.parse_params({"person_backend": "yolo26_isolated"})["person_backend"], "yolo26_isolated")
+        with self.assertRaises(server.UserMessage):
+            server.parse_params({"person_backend": "unknown"})
+
+    def test_optional_backend_does_not_require_yolox_weights(self):
+        args = SimpleNamespace(ckpt=None, model_cfg=None)
+        with patch.object(server, "missing_model_paths", return_value=[]) as missing:
+            paths = server.checked_model_paths(args, "male", person_backend="yolo26_isolated")
+            self.assertNotIn(files.resolve_model(files.YOLOX), paths)
+            self.assertEqual(paths[-2], files.smplh_reference_path("male"))
+            self.assertEqual(tuple(missing.call_args.args[0]), paths)
+
+    def test_switching_backend_drops_person_and_feature_caches(self):
+        with TemporaryDirectory() as directory:
+            with (patch.object(server, "ARGS", SimpleNamespace(work_dir=directory)),
+                  patch.object(server, "JOBS", {}), patch.object(server, "MEMBER_DIRS", {}),
+                  patch.object(server, "enqueue"), server.app.test_client() as client):
+                job = server.new_job("people.mp4", server.parse_params({"person_backend": "yolo26_isolated"}), ".mp4")
+                job.update(status="done", selected_person=1)
+                root = Path(server.job_dir(job["id"]))
+                (root / "input.mp4").write_bytes(b"original")
+                inputs = root / "input"
+                inputs.mkdir()
+                artifacts = ["input_30fps.mp4", "input_bbox.npz", "person_masks.sqlite", "input_isolated.mp4",
+                             "input_isolated.json", "input_sam3d_feat_static_isolated.pt",
+                             "input_sam3d_feat_static_isolated.pt.hands.npy", "input_static_camera.npz"]
+                for name in artifacts:
+                    (inputs / name).write_bytes(b"cached")
+                response = client.post(f"/api/jobs/{job['id']}/rerun", json={"person_backend": "yolox"})
+                self.assertEqual(response.status_code, 200, response.json)
+                new = server.JOBS[response.json["job_id"]]
+                copied = Path(server.job_dir(new["id"])) / "input"
+                self.assertEqual(sorted(p.name for p in copied.iterdir()), ["input_30fps.mp4"])
+                self.assertIsNone(new["selected_person"])
+
+    def test_group_reports_include_all_actors(self):
+        jobs = [dict(id=str(i), status="done", progress=100, finished=1,
+                     isolation_report=dict(frames=30, missing_mask_frames=i)) for i in (1, 2)]
+        view = server._scene_status_locked(jobs[0], jobs)
+        self.assertEqual(view["isolation_report"], dict(frames=60, missing_mask_frames=3))
+
+
 class VideoSourceTest(unittest.TestCase):
     def test_partial_preview_and_original_keep_separate_byte_ranges(self):
         with TemporaryDirectory() as directory:

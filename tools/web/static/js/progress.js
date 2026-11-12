@@ -49,6 +49,8 @@ const LEGACY = new Map(Object.entries({
   "Done": "job.done",
 }));
 const COUNTERS = [
+  [/^人物分割与跟踪 · (\d+)\/(\d+|\?) 帧$/, "job.segmentation_frames"],
+  [/^逐人隔离 · (\d+)\/(\d+) 帧$/, "job.isolation_frames"],
   [/^SAM: (\d+)\/(\d+) frames$/, "job.sam_frames"],
   [/^正在补提取手框 · (\d+) \/ (\d+) 帧$/, "job.hand_box_frames"],
   [/^HaMeR 手指精修 · (\d+) \/ (\d+) 帧$/, "job.hamer_frames"],
@@ -182,7 +184,7 @@ export function initProgress() {
     showUploading(name, frac) {
       show("jobCard");
       for (const id of ["btnRerun", "btnAlignScene", "btnSafeRerun", "btnStopRun", "queueBox",
-        "jobCamera", "jobSamBatch", "jobHamer", "jobCorrection", "jobError"]) show(id, false);
+        "jobCamera", "jobSamBatch", "jobHamer", "jobIsolation", "jobCorrection", "jobError"]) show(id, false);
       setText($("jobName"), name);
       setBadge("uploading");
       setText($("jobMsg"), m("job.importing", { percent: Math.round(frac * 100) }));
@@ -208,6 +210,11 @@ export function initProgress() {
       renderCamera(job.camera);
       renderBatch(job.sam_batch);
       renderHamer(job.hamer_report);
+      const isolation = job.isolation_report;
+      setText($("jobIsolation"), isolation ? m("progress.isolation", {
+        frames: isolation.frames, missing: isolation.missing_mask_frames,
+      }) : "");
+      show("jobIsolation", !!isolation);
       renderCorrection(job.correction, job.params);
       setText($("workspaceState"), () => job.status === "running" ? `${job.progress}% · ${jobMessage(job)}`
         : job.status === "done" ? `${jobMessage(job)} · FlowHMR` : statusLabel(job.status));
@@ -219,7 +226,7 @@ export function initProgress() {
     showError(msg) {
       show("jobCard");
       for (const id of ["btnRerun", "btnAlignScene", "btnSafeRerun", "btnStopRun",
-        "jobCamera", "jobSamBatch", "jobHamer", "jobCorrection"]) show(id, false);
+        "jobCamera", "jobSamBatch", "jobHamer", "jobIsolation", "jobCorrection"]) show(id, false);
       setBadge("failed");
       setText($("jobError"), msg);
       setAttr($("jobError"), "title", "");

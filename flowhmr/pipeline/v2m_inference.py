@@ -6,6 +6,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Callable, List, Optional
 
 import cv2
@@ -495,6 +496,16 @@ class V2MInferenceEngine:
                 owner.device = self.device
             self._active_stage = stage
 
+    def _activate_detector(self):
+        """Load YOLOX only for callers that actually request box detection."""
+        if self.proc.detector is None:
+            from flowhmr.utils.runtime_video_processing import build_human_detector
+            self._activate_stage()
+            self.proc.detector = build_human_detector(self.device)
+            if self._staged_models:
+                self._staged_models[StageName.DETECTION] = (self.proc.detector.model, self.proc.detector)
+        self._activate_stage(StageName.DETECTION)
+
     @contextmanager
     def _release_camera_cuda(self):
         """Give the camera worker room on small or already occupied GPUs."""
@@ -600,7 +611,6 @@ class V2MInferenceEngine:
 
         from flowhmr.utils.runtime_video_processing import (
             VideoProcessor,
-            build_human_detector,
         )
         from flowhmr.core.bodymodels.smpl_skeleton import SMPLSkeleton, SMPLMesh
         body_reference, smpl_model_path = cls._body_reference(smpl_model_path, body_reference)
@@ -616,11 +626,8 @@ class V2MInferenceEngine:
         if stage_models:
             print("  [cuda] Low VRAM: load inactive models on CPU, move each to CUDA for its stage", flush=True)
 
-        detector = build_human_detector(resident)
-        proc = VideoProcessor(detector=detector)
-        if stage_models:
-            staged[StageName.DETECTION] = (detector.model, detector)
-        print(f"  YOLOX detector loaded")
+        # Detection is selected per job; an isolation job need not load YOLOX.
+        proc = VideoProcessor(detector=None)
 
         if sam_device_ids and len(sam_device_ids) > 1:
             from flowhmr.utils.runtime_sam_worker import SamWorkerPool
@@ -735,7 +742,7 @@ class V2MInferenceEngine:
         t0 = time.time()
 
         from flowhmr.utils.runtime_video_processing import VideoProcessor
-        self._activate_stage(StageName.DETECTION)
+        self._activate_detector()
         tracking_result = self.proc.detect_and_track(working_video)
 
         if not tracking_result.tracks:
@@ -1032,6 +1039,7 @@ class V2MInferenceEngine:
                       hamer_stride: int = 1,
                       vggt_frame_interval: int = 1,
                       static_camera: bool = False,
+                      person_backend: str = "yolox",
                       person_selector: Callable = None,
                       progress_callback: Callable[[StageName, int, str], None] = None,
                       cancel_check: Callable[[], None] = None,
@@ -1052,6 +1060,10 @@ class V2MInferenceEngine:
         """
         if sam_chunk_size is not None and (type(sam_chunk_size) is not int or sam_chunk_size < 1):
             raise ValueError("sam_chunk_size must be a positive integer or automatic")
+        from flowhmr.utils.runtime_person_isolation import BACKENDS, MASK_CACHE, analyze_people, render_person
+        if person_backend not in BACKENDS:
+            raise ValueError("Unknown person backend")
+        isolated = person_backend == "yolo26_isolated"
         from flowhmr.utils.runtime_hamer import hamer_available, load_hand_boxes, refine_fingers, MISSING_HAMER
         from flowhmr.utils.runtime_video_processing import VideoProcessor
 
@@ -1077,7 +1089,7 @@ class V2MInferenceEngine:
         os.makedirs(sub_dir, exist_ok=True)
 
         bbox_npz_path = os.path.join(sub_dir, f"{video_name}_bbox.npz")
-        feature_suffix = "_static" if static_camera else ""
+        feature_suffix = ("_static" if static_camera else "") + ("_isolated" if isolated else "")
         camera_mode = "static" if static_camera else "vggt"
         feat_pt_path = os.path.join(sub_dir, f"{video_name}_sam3d_feat{feature_suffix}.pt")
         batch_path = feat_pt_path + ".batch.json"
@@ -1097,13 +1109,31 @@ class V2MInferenceEngine:
             last_requested = min(last_requested, max_frames - 1) if last_requested is not None else max_frames - 1
 
         if os.path.exists(bbox_npz_path):
+            with np.load(bbox_npz_path, allow_pickle=False) as data:
+                cached_backend = str(data["person_backend"]) if "person_backend" in data else "yolox"
+            if cached_backend != person_backend:
+                os.remove(bbox_npz_path)
+                for path in Path(sub_dir).glob(f"{video_name}_sam3d_feat*"):
+                    path.unlink()
+
+        if os.path.exists(bbox_npz_path):
             print(f"  [bbox] skip (exists): {bbox_npz_path}")
             _pcb(StageName.DETECTION, 100, "Bbox cached")
         else:
             _pcb(StageName.DETECTION, 20, "Transcoded, detecting")
 
-            self._activate_stage(StageName.DETECTION)
-            result = self.proc.detect_and_track(working_video)
+            if isolated:
+                # Park resident motion/body models while the temporary detector
+                # and appearance encoder own the GPU; release them after analysis.
+                with self._release_camera_cuda():
+                    result = analyze_people(
+                        working_video, os.path.join(sub_dir, MASK_CACHE), self.device,
+                        check=cancel_check or (lambda: None),
+                        notify=lambda message: _pcb(StageName.DETECTION, 30, message),
+                    )
+            else:
+                self._activate_detector()
+                result = self.proc.detect_and_track(working_video)
             if result.total_frames != video_meta.total_frames:
                 _details(source_frames=result.total_frames)
             _pcb(StageName.DETECTION, 60, f"Found {len(result.tracks)} person(s)")
@@ -1147,7 +1177,9 @@ class V2MInferenceEngine:
                       f"/ total={result.total_frames}")
             bbox_np, start_end = VideoProcessor.track_bboxes(result, track_idx)
 
-            np.savez(bbox_npz_path, bbox=bbox_np, start_end=start_end)
+            np.savez(bbox_npz_path, bbox=bbox_np, start_end=start_end,
+                     track_id=result.tracks[track_idx].track_id if track_idx >= 0 else -1,
+                     person_backend=person_backend)
             print(f"  [bbox] saved -> {bbox_npz_path}  (shape={bbox_np.shape})")
             _pcb(StageName.DETECTION, 100, "Bbox done")
 
@@ -1157,6 +1189,9 @@ class V2MInferenceEngine:
                 "vggt_camera.npz", "static_camera.npz", "sam3d_feat.pt", "sam3d_feat_static.pt",
                 "sam3d_feat.pt.batch.json", "sam3d_feat_static.pt.batch.json",
                 "sam3d_feat.pt.hands.npy", "sam3d_feat_static.pt.hands.npy",
+                "sam3d_feat_isolated.pt", "sam3d_feat_static_isolated.pt",
+                "sam3d_feat_isolated.pt.batch.json", "sam3d_feat_static_isolated.pt.batch.json",
+                "sam3d_feat_isolated.pt.hands.npy", "sam3d_feat_static_isolated.pt.hands.npy",
             )),
         )
 
@@ -1209,6 +1244,22 @@ class V2MInferenceEngine:
         # ==== Step 3: SAM feature extraction ====
         print(f"\n  === Step 3: SAM Feature ===")
         _pcb(StageName.FEATURE_EXTRACT, 0, "Starting SAM extraction")
+
+        person_video = working_video
+        if isolated:
+            with np.load(bbox_npz_path, allow_pickle=False) as data:
+                track_id = int(data["track_id"])
+            person_video, isolation_report = render_person(
+                working_video, os.path.join(sub_dir, MASK_CACHE), track_id,
+                os.path.join(sub_dir, f"{video_name}_isolated.mp4"), (s, e),
+                check=cancel_check or (lambda: None),
+                notify=lambda message: _pcb(StageName.FEATURE_EXTRACT, 0, message),
+            )
+            _details(isolation_report=isolation_report)
+            if not isolation_report["reused"]:
+                for path in (feat_pt_path, batch_path, hand_boxes_path):
+                    if os.path.exists(path):
+                        os.remove(path)
 
         feature_cached = False
         if os.path.exists(feat_pt_path):
@@ -1306,12 +1357,12 @@ class V2MInferenceEngine:
                 on_oom_reduce=_reduce_batch if sam_chunk_size is None else None,
             )
             if feature_cached:
-                hand_boxes = extract_hand_boxes(working_video, **sam_args)
+                hand_boxes = extract_hand_boxes(person_video, **sam_args)
             else:
                 box_chunks = []
                 if extract_hand_boxes is not None:
                     sam_args["hand_boxes_out"] = box_chunks
-                tokens = self.sam_extractor.extract_video_tokens(working_video, token_dim=3072, **sam_args)
+                tokens = self.sam_extractor.extract_video_tokens(person_video, token_dim=3072, **sam_args)
                 tokens = tokens.contiguous().cpu().to(torch.float32)
                 if tokens.shape != (t_track, 3072):
                     raise ValueError(
@@ -1407,7 +1458,7 @@ class V2MInferenceEngine:
                 _pcb(StageName.HAMER, min(99, 100 * current // total), message)
 
             final_output, report = refine_fingers(
-                working_video, hand_boxes_path, s, final_output, device=self.device,
+                person_video, hand_boxes_path, s, final_output, device=self.device,
                 stride=hamer_stride, cancel_check=cancel_check, on_progress=_hamer_progress,
             )
             _details(hamer_report=report)

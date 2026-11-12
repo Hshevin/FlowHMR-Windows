@@ -161,6 +161,14 @@
         <input class="input" id="optVggt" type="number" min="1" max="120" step="1" value="10">
       </label>
       <p class="setting-help" id="cameraHint" data-i18n="camera.static_hint">仅平移、推拉或缩放通常选固定机位。镜头明显转向、俯仰或滚转时，选运动相机。</p>
+      <label class="field camera-mode">
+        <span data-i18n="person.backend">人物检测与隔离</span>
+        <select class="input" id="optPersonBackend" aria-describedby="personBackendHint">
+          <option value="yolox" data-i18n="person.backend_yolox">YOLOX · 原画面</option>
+          <option value="yolo26_isolated" data-i18n="person.backend_isolated">YOLO26 · 逐人分割隔离（实验）</option>
+        </select>
+      </label>
+      <p class="setting-help" id="personBackendHint" data-i18n="person.backend_hint">隔离模式保留选中人物，模糊其他画面，再逐人动捕。需额外依赖和模型；不能恢复被遮挡的肢体。</p>
       <div class="setting-row person-setting">
         <div>
           <div class="setting-label" data-i18n="person.manual">手动选人</div>
@@ -281,6 +289,7 @@
       <p class="setting-help hidden" id="jobCamera"></p>
       <p class="setting-help hidden" id="jobSamBatch"></p>
       <p class="setting-help hidden" id="jobHamer"></p>
+      <p class="setting-help hidden" id="jobIsolation"></p>
       <p class="setting-help hidden" id="jobCorrection"></p>
       <p class="error hidden" id="jobError"></p>
       <button type="button" class="btn-primary block rerun-btn hidden" id="btnAlignScene" data-i18n="progress.align">对齐场景</button>

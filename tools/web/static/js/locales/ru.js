@@ -651,7 +651,7 @@ export default Object.freeze({
   "stage.generation": "Генерация движения",
   "stage.hamer": "Уточнение пальцев",
   "stage.scene": "Выравнивание сцены",
-  "stage.hint_detection": "Обнаружение и отслеживание людей YOLOX",
+  "stage.hint_detection": "Обнаружение людей и отслеживание личности",
   "stage.hint_camera": "Оценка камеры VGGT-Omega",
   "stage.hint_static": "Неподвижная камера, оценка пропущена",
   "stage.hint_feature_extract": "Извлечение признаков SAM 3D Body",
@@ -676,5 +676,13 @@ export default Object.freeze({
   "progress.correction_sole": "Прилегание стопы {strength}",
   "progress.correction_sole_unchanged": "Прилегание стопы {strength} (без коррекции)",
   "progress.ahead": "Задач впереди: {count}",
-  "progress.starting_soon": "Скоро начнётся"
+  "progress.starting_soon": "Скоро начнётся",
+  "person.backend": "Обнаружение и изоляция людей",
+  "person.backend_yolox": "YOLOX · исходные кадры",
+  "person.backend_isolated": "YOLO26 · изоляция каждого человека (экспериментально)",
+  "person.backend_hint": "Сохраняет выбранного человека чётким и размывает остальное перед захватом движения. Требуются дополнительные зависимости и модели; скрытые конечности не восстанавливаются.",
+  "server.param_person_backend": "Выберите YOLOX или изоляцию людей YOLO26.",
+  "job.segmentation_frames": "Сегментация и отслеживание · {current}/{total} кадров",
+  "job.isolation_frames": "Изоляция человека · {current}/{total} кадров",
+  "progress.isolation": "Изоляция: {frames} кадров людей; {missing} кадров без действительной маски остаются размытыми."
 });

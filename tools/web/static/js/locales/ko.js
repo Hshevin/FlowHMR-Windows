@@ -651,7 +651,7 @@ export default Object.freeze({
   "stage.generation": "모션 생성",
   "stage.hamer": "손가락 보정",
   "stage.scene": "장면 정렬",
-  "stage.hint_detection": "YOLOX 인물 감지 및 추적",
+  "stage.hint_detection": "인물 감지 및 신원 추적",
   "stage.hint_camera": "VGGT-Omega 카메라 추정",
   "stage.hint_static": "고정 카메라 사용, 카메라 추정 건너뜀",
   "stage.hint_feature_extract": "SAM 3D Body 특징 추출",
@@ -676,5 +676,13 @@ export default Object.freeze({
   "progress.correction_sole": "발바닥 접지 {strength}",
   "progress.correction_sole_unchanged": "발바닥 접지 {strength}(조정 없음)",
   "progress.ahead": "앞선 작업 {count}개",
-  "progress.starting_soon": "곧 시작"
+  "progress.starting_soon": "곧 시작",
+  "person.backend": "인물 감지 및 분리",
+  "person.backend_yolox": "YOLOX · 원본 영상",
+  "person.backend_isolated": "YOLO26 · 인물별 분리 (실험)",
+  "person.backend_hint": "선택한 인물은 선명하게 유지하고 나머지를 흐리게 처리한 뒤 인물별로 동작을 생성합니다. 추가 의존성과 모델이 필요하며 가려진 팔다리는 복원할 수 없습니다.",
+  "server.param_person_backend": "YOLOX 또는 YOLO26 인물 분리를 선택하세요.",
+  "job.segmentation_frames": "인물 분할 및 추적 · {current}/{total} 프레임",
+  "job.isolation_frames": "인물 분리 · {current}/{total} 프레임",
+  "progress.isolation": "인물 분리: {frames} 인물 프레임 중 유효한 마스크가 없는 {missing} 프레임은 흐리게 유지됩니다."
 });
